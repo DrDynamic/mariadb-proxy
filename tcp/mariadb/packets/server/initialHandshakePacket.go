@@ -62,8 +62,6 @@ func NewInitialHandshakePacket(packet *packets.Packet) InitialHandshakePacket {
 	// if capabilities.PLUGIN_AUTH
 	authPluginName := reader.PopNullTerminatedString()
 
-	fmt.Printf(" \r\n")
-
 	packet.Type = PacketTypeInitialHandshakePacket
 
 	return InitialHandshakePacket{

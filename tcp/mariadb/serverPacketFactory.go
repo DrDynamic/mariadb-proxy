@@ -19,31 +19,52 @@ const (
 	ServerStateResultsetRow
 )
 
-type serverPacketFactory struct {
+type ServerPacketFactory struct {
 	state   *PacketFactoryState
 	builder packets.PacketBuilder
+
+	RecPackets int
 }
 
-func NewServerPacketFactory(state *PacketFactoryState) serverPacketFactory {
+func NewServerPacketFactory(state *PacketFactoryState) ServerPacketFactory {
 	state.ServerState = ServerStateInit
-	return serverPacketFactory{
+
+	builder := packets.NewPacketBuilder()
+	builder.DebugPrint = false
+
+	return ServerPacketFactory{
 		state:   state,
-		builder: *packets.NewPacketBuilder(),
+		builder: builder,
+
+		RecPackets: 0,
 	}
 }
 
-func (factory *serverPacketFactory) AddBytes(data []byte) {
+func (factory *ServerPacketFactory) GetState() PacketFactoryState {
+	return *factory.state
+}
+
+func (factory *ServerPacketFactory) GetBufferSize() int {
+	return len(factory.builder.GetBuffer())
+}
+func (factory *ServerPacketFactory) GetBuffer() []byte {
+	return factory.builder.GetBuffer()
+}
+
+func (factory *ServerPacketFactory) AddBytes(data []byte) {
 	factory.builder.AddBytes(data)
 }
 
-func (factory *serverPacketFactory) CreatePacket() packets.BasePacket {
+func (factory *ServerPacketFactory) CreatePacket() packets.BasePacket {
 	packet := factory.builder.BuildPacket()
 	if packet == nil {
 		return nil
 	}
+
+	factory.RecPackets++
 	return factory.convertPacket(packet)
 }
-func (factory *serverPacketFactory) convertPacket(packet *packets.Packet) packets.BasePacket {
+func (factory *ServerPacketFactory) convertPacket(packet *packets.Packet) packets.BasePacket {
 
 	switch factory.state.ServerState {
 	case ServerStateInit:
@@ -71,6 +92,7 @@ func (factory *serverPacketFactory) convertPacket(packet *packets.Packet) packet
 			cc := p.(resultset.ColumnCountPacket)
 
 			factory.state.ResultsetInfo.ColumnCount = int(cc.ColumnCount)
+			factory.state.ResultsetInfo.ColumnDefinitions = make([]resultset.ColumnDefinitionPacket, 0)
 
 			if (factory.state.Capabilities&packets.MARIADB_CLIENT_CACHE_METADATA) == 0 ||
 				cc.MetadataFollows {
@@ -78,6 +100,8 @@ func (factory *serverPacketFactory) convertPacket(packet *packets.Packet) packet
 			} else {
 				factory.state.ServerState = ServerStateResultsetRow
 			}
+		} else {
+			factory.state.ServerState = ServerStateNone
 		}
 
 		return p
@@ -87,6 +111,8 @@ func (factory *serverPacketFactory) convertPacket(packet *packets.Packet) packet
 		if factory.state.ResultsetInfo.ColumnCount > len(factory.state.ResultsetInfo.ColumnDefinitions) {
 			definition = resultset.NewColumnDefinitionPacket(packet, factory.state.Capabilities)
 			factory.state.ResultsetInfo.ColumnDefinitions = append(factory.state.ResultsetInfo.ColumnDefinitions, definition.(resultset.ColumnDefinitionPacket))
+		} else {
+			definition = factory.convertPacket(packet)
 		}
 
 		if factory.state.ResultsetInfo.ColumnCount <= len(factory.state.ResultsetInfo.ColumnDefinitions) {
@@ -121,7 +147,7 @@ func (factory *serverPacketFactory) convertPacket(packet *packets.Packet) packet
 	return packet
 }
 
-func (factory *serverPacketFactory) identifyEofPacket(packet *packets.Packet) packets.BasePacket {
+func (factory *ServerPacketFactory) identifyEofPacket(packet *packets.Packet) packets.BasePacket {
 	if (factory.state.Capabilities&packets.CLIENT_DEPRECATE_EOF) == 0 &&
 		packet.Body[0] == 0xFE {
 		return server.NewEofPacket(packet)
@@ -129,14 +155,14 @@ func (factory *serverPacketFactory) identifyEofPacket(packet *packets.Packet) pa
 	return packet
 }
 
-func (factory *serverPacketFactory) identifyErrPacket(packet *packets.Packet) packets.BasePacket {
+func (factory *ServerPacketFactory) identifyErrPacket(packet *packets.Packet) packets.BasePacket {
 	if packet.Body[0] == 0xFF {
 		return server.NewErrPacket(packet)
 	}
 	return packet
 }
 
-func (factory *serverPacketFactory) identifyOkPacket(packet *packets.Packet) packets.BasePacket {
+func (factory *ServerPacketFactory) identifyOkPacket(packet *packets.Packet) packets.BasePacket {
 	if packet.Body[0] == 0x00 {
 		return server.NewOkPacket(packet)
 	}
@@ -149,23 +175,27 @@ func (factory *serverPacketFactory) identifyOkPacket(packet *packets.Packet) pac
 	return packet
 }
 
-func (factory *serverPacketFactory) identifyLocalInlinePacket(packet *packets.Packet) packets.BasePacket {
+func (factory *ServerPacketFactory) identifyLocalInlinePacket(packet *packets.Packet) packets.BasePacket {
 	if packet.Body[0] == 0xFB {
 		return server.NewLocalInlinePacket(packet)
 	}
 	return packet
 }
 
-func (factory *serverPacketFactory) identifyResultSet(packet *packets.Packet) packets.BasePacket {
+func (factory *ServerPacketFactory) identifyResultSet(packet *packets.Packet) packets.BasePacket {
 	if packet.Length == 1 || packet.Length == 2 {
 		return resultset.NewColumnCountPacket(packet)
 	}
 	return packet
 }
 
-func (factory *serverPacketFactory) identifyResultSetRow(packet *packets.Packet) packets.BasePacket {
-	if packet.Length == 1 || packet.Length == 2 {
-		return resultset.NewResultsetRowPacket(packet)
+func (factory *ServerPacketFactory) identifyResultSetRow(packet *packets.Packet) packets.BasePacket {
+
+	if packet.Body[0] == 0x00 ||
+		packet.Body[0] == 0xFE ||
+		packet.Body[0] == 0xFF {
+		return packet
 	}
-	return packet
+
+	return resultset.NewResultsetRowPacket(packet)
 }

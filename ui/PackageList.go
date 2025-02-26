@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"mschon/dbproxy/tcp"
 	"mschon/dbproxy/tcp/mariadb/packets"
 	"strconv"
@@ -61,7 +60,7 @@ func (m PackageList) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		rows = append(rows, table.Row{msg.Direction.String(), strconv.Itoa(int(msg.Packet.GetSequence())), msg.Packet.String()})
 		m.table.SetRows(rows)
 
-		fmt.Printf("[%d] %s\r\n", msg.Packet.GetSequence(), msg.Packet.String())
+		//		fmt.Printf("[%d] %s\r\n", msg.Packet.GetSequence(), msg.Packet.String())
 
 	default:
 		m.table, cmd = m.table.Update(msg)

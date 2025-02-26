@@ -47,13 +47,15 @@ type ProxyConnection struct {
 type Proxy struct {
 	Connections []ProxyConnection
 
-	RecChan chan ProxyRecMsg
+	ServerRecChan chan ProxyRecMsg
+	ClientRecChan chan ProxyRecMsg
 }
 
 func NewProxy() Proxy {
 	return Proxy{
-		Connections: make([]ProxyConnection, 0),
-		RecChan:     make(chan ProxyRecMsg),
+		Connections:   make([]ProxyConnection, 0),
+		ServerRecChan: make(chan ProxyRecMsg),
+		ClientRecChan: make(chan ProxyRecMsg),
 	}
 }
 
@@ -85,33 +87,33 @@ func (proxy *Proxy) Listen(listenAddress string, forwardAddress string) {
 
 		proxy.Connections = append(proxy.Connections, pair)
 
-		go proxyHandler(pair.Client, pair.Forward, pair.quitChan, func(data []byte) {
-			proxy.RecChan <- ProxyRecMsg{
-				Direction:  ProxyRecDirection_toServer,
-				Connection: pair,
-				Data:       data,
-			}
-		})
-		go proxyHandler(pair.Forward, pair.Client, pair.quitChan, func(data []byte) {
-			proxy.RecChan <- ProxyRecMsg{
-				Direction:  ProxyRecDirection_fromServer,
-				Connection: pair,
-				Data:       data,
-			}
-		})
+		go proxy.proxyHandler(&pair, ProxyRecDirection_toServer)
+		go proxy.proxyHandler(&pair, ProxyRecDirection_fromServer)
 	}
 }
 
-func proxyHandler(local net.Conn, forward net.Conn, quitChan chan bool, f func([]byte)) {
+func (proxy *Proxy) proxyHandler(pair *ProxyConnection, direction ProxyRecDirection) {
 	buffer := make([]byte, 1024)
+
+	var local net.Conn = nil
+	var forward net.Conn = nil
+	var msgChan chan ProxyRecMsg = nil
+	if direction == ProxyRecDirection_toServer {
+		local = pair.Client
+		forward = pair.Forward
+		msgChan = proxy.ClientRecChan
+	} else {
+		local = pair.Forward
+		forward = pair.Client
+		msgChan = proxy.ServerRecChan
+	}
 
 	for {
 		select {
-		case <-quitChan:
+		case <-pair.quitChan:
 			return
 		default:
 			n, err := local.Read(buffer)
-
 			if err != nil {
 				if err != io.EOF {
 					fmt.Println(" error: ", err)
@@ -120,7 +122,17 @@ func proxyHandler(local net.Conn, forward net.Conn, quitChan chan bool, f func([
 			}
 
 			forward.Write(buffer[:n])
-			f(buffer[:n])
+
+			data := make([]byte, n)
+			copy(data, buffer[:n])
+
+			msg := ProxyRecMsg{
+				Direction:  ProxyRecDirection_fromServer,
+				Connection: *pair,
+				Data:       data,
+			}
+
+			msgChan <- msg
 		}
 	}
 }
