@@ -6,6 +6,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+type FocusMsg struct{}
+type BlurMsg struct{}
+
+type Focusable interface {
+	GetFocus() bool
+	Focus()
+	Blur()
+}
+
 type main struct {
 	view tea.Model
 }
