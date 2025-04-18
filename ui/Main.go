@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"mschon/dbproxy/tcp/mariadb"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -19,9 +20,9 @@ type main struct {
 	view tea.Model
 }
 
-func New() main {
+func New(connectionManager *mariadb.MariadbConnectionManager) main {
 	return main{
-		view: NewDashboard(),
+		view: NewDashboard(connectionManager),
 	}
 }
 

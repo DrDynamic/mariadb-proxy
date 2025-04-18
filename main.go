@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"mschon/dbproxy/tcp"
 	"mschon/dbproxy/tcp/mariadb"
-	"mschon/dbproxy/tcp/mariadb/packets"
 	"mschon/dbproxy/ui"
 	"os"
 
@@ -14,10 +13,12 @@ import (
 func main() {
 	config = GetConfig()
 
-	p := tea.NewProgram(ui.New())
-	//var p *tea.Program = nil
+	proxy := tcp.NewProxy()
+	connectionManager := mariadb.NewConnectionManager(&proxy)
 
-	startProxy(config, p)
+	p := tea.NewProgram(ui.New(&connectionManager))
+
+	startProxy(&connectionManager, config, p)
 
 	if _, err := p.Run(); err != nil {
 		fmt.Println("Error running program:", err)
@@ -25,67 +26,15 @@ func main() {
 	}
 }
 
-func startProxy(config *Config, program *tea.Program) {
-	proxy := tcp.NewProxy()
+func startProxy(connectionManager *mariadb.MariadbConnectionManager, config *Config, program *tea.Program) {
 
-	facrotyState := mariadb.NewPacketFactoryState()
+	connectionManager.AddOnConnectionChangeListener(func(connection mariadb.MariadbConnection) {
+		program.Send(ui.UpdateConnectionsMsg{})
+	})
 
-	serverFactory := mariadb.NewServerPacketFactory(&facrotyState)
-	clientFactory := mariadb.NewClientPacketFactory(&facrotyState)
+	connectionManager.AddOnNewConnectionListener(func(connection mariadb.MariadbConnection) {
+		program.Send(ui.UpdateConnectionsMsg{})
+	})
 
-	go onServerRec(&serverFactory, &proxy, program)
-	go onClientRec(&clientFactory, &proxy, program)
-	go proxy.Listen(config.ProxyHost, config.ForwardHost)
-}
-
-func onServerRec(serverFactory *mariadb.ServerPacketFactory, proxy *tcp.Proxy, program *tea.Program) {
-
-	for {
-		msg := <-proxy.ServerRecChan
-
-		serverFactory.AddBytes(msg.Data)
-		var packet packets.BasePacket = serverFactory.CreatePacket()
-
-		for packet != nil && program == nil {
-			fmt.Printf("[S][%02d] %s\r\n", packet.GetSequence(), packet.String())
-			packet = serverFactory.CreatePacket()
-		}
-
-		for packet != nil && program != nil {
-			program.Send(ui.PacketIoMessage{
-				Direction:  msg.Direction,
-				Connection: msg.Connection,
-				Packet:     packet,
-			})
-
-			packet = serverFactory.CreatePacket()
-		}
-	}
-
-}
-
-func onClientRec(clientFactory *mariadb.ClientPacketFactory, proxy *tcp.Proxy, program *tea.Program) {
-
-	for {
-		msg := <-proxy.ClientRecChan
-
-		clientFactory.AddBytes(msg.Data)
-		var packet packets.BasePacket = clientFactory.CreatePacket()
-
-		for packet != nil && program == nil {
-			fmt.Printf("[C][%02d] %s\r\n", packet.GetSequence(), packet.String())
-			packet = clientFactory.CreatePacket()
-		}
-
-		for packet != nil && program != nil {
-			program.Send(ui.PacketIoMessage{
-				Direction:  msg.Direction,
-				Connection: msg.Connection,
-				Packet:     packet,
-			})
-
-			packet = clientFactory.CreatePacket()
-		}
-	}
-
+	go connectionManager.Listen(config.ProxyHost, config.ForwardHost)
 }

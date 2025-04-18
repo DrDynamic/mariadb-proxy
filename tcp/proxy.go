@@ -34,28 +34,38 @@ type ProxyRecMsg struct {
 }
 
 func (msg ProxyRecMsg) String() string {
-	return fmt.Sprintf("[ProxyRecMsg %s %d [%d]byte]", msg.Direction.String(), msg.Connection, len(msg.Data))
+	return fmt.Sprintf("[ProxyRecMsg %s %v [%d]byte]", msg.Direction.String(), msg.Connection, len(msg.Data))
 }
+
+type ConnectionStatus string
+
+const (
+	ConnectionStatus_Unknown = "unknown"
+	ConnectionStatus_Active  = "active"
+	ConnectionStatus_Closed  = "closed"
+)
 
 type ProxyConnection struct {
 	Client  net.Conn
 	Forward net.Conn
 
-	quitChan chan bool
+	Status ConnectionStatus
+
+	ServerRecChan    chan ProxyRecMsg
+	ClientRecChan    chan ProxyRecMsg
+	StatusChangeChan chan ConnectionStatus
+	quitChan         chan bool
 }
 
 type Proxy struct {
-	Connections []ProxyConnection
-
-	ServerRecChan chan ProxyRecMsg
-	ClientRecChan chan ProxyRecMsg
+	Connections []*ProxyConnection
+	ConnectChan chan *ProxyConnection
 }
 
 func NewProxy() Proxy {
 	return Proxy{
-		Connections:   make([]ProxyConnection, 0),
-		ServerRecChan: make(chan ProxyRecMsg),
-		ClientRecChan: make(chan ProxyRecMsg),
+		Connections: make([]*ProxyConnection, 0),
+		ConnectChan: make(chan *ProxyConnection),
 	}
 }
 
@@ -80,12 +90,18 @@ func (proxy *Proxy) Listen(listenAddress string, forwardAddress string) {
 		}
 
 		pair := ProxyConnection{
-			Client:   conn,
-			Forward:  fwd,
-			quitChan: make(chan bool),
+			Client:           conn,
+			Forward:          fwd,
+			ServerRecChan:    make(chan ProxyRecMsg),
+			ClientRecChan:    make(chan ProxyRecMsg),
+			StatusChangeChan: make(chan ConnectionStatus),
+			Status:           ConnectionStatus_Active,
+			quitChan:         make(chan bool),
 		}
 
-		proxy.Connections = append(proxy.Connections, pair)
+		proxy.Connections = append(proxy.Connections, &pair)
+
+		proxy.ConnectChan <- &pair
 
 		go proxy.proxyHandler(&pair, ProxyRecDirection_toServer)
 		go proxy.proxyHandler(&pair, ProxyRecDirection_fromServer)
@@ -101,11 +117,11 @@ func (proxy *Proxy) proxyHandler(pair *ProxyConnection, direction ProxyRecDirect
 	if direction == ProxyRecDirection_toServer {
 		local = pair.Client
 		forward = pair.Forward
-		msgChan = proxy.ClientRecChan
+		msgChan = pair.ClientRecChan
 	} else {
 		local = pair.Forward
 		forward = pair.Client
-		msgChan = proxy.ServerRecChan
+		msgChan = pair.ServerRecChan
 	}
 
 	for {
@@ -118,6 +134,8 @@ func (proxy *Proxy) proxyHandler(pair *ProxyConnection, direction ProxyRecDirect
 				if err != io.EOF {
 					fmt.Println(" error: ", err)
 				}
+				pair.Status = ConnectionStatus_Closed
+				pair.StatusChangeChan <- pair.Status
 				return
 			}
 

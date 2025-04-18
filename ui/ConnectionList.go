@@ -1,19 +1,33 @@
 package ui
 
 import (
+	"fmt"
+	"mschon/dbproxy/tcp/mariadb"
+	"mschon/dbproxy/util"
+
 	"github.com/charmbracelet/bubbles/table"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-type ConnectionList struct {
-	focus bool
-	table table.Model
+type UpdateConnectionsMsg struct {
 }
 
-func NewConnectionList() ConnectionList {
+type ConnectionList struct {
+	focus             bool
+	table             table.Model
+	connectionManager *mariadb.MariadbConnectionManager
+}
+
+func makeRow(connection *mariadb.MariadbConnection) table.Row {
+	proxyConnection := connection.GetProxyConnection()
+
+	return table.Row{fmt.Sprintf("%p", proxyConnection), string(proxyConnection.Status)}
+}
+
+func NewConnectionList(connectionManager *mariadb.MariadbConnectionManager) ConnectionList {
 	var columns = []table.Column{
-		{Title: "id", Width: 4},
+		{Title: "id", Width: 16},
 		{Title: "status", Width: 10},
 	}
 
@@ -26,21 +40,17 @@ func NewConnectionList() ConnectionList {
 		BorderForeground(lipgloss.Color("240")).
 		BorderBottom(true)
 
+	rows := util.MapSlice(connectionManager.Connections, makeRow)
+
 	return ConnectionList{
 		focus: false,
 		table: table.New(
 			table.WithColumns(columns),
-			table.WithRows([]table.Row{
-				{"#46436", "closed"},
-				{"#46436", "closed"},
-				{"#46436", "closed"},
-				{"#46436", "closed"},
-				{"#46436", "closed"},
-				{"#46436", "closed"},
-			}),
+			table.WithRows(rows),
 			table.WithFocused(false),
 			table.WithStyles(styles),
 		),
+		connectionManager: connectionManager,
 	}
 }
 
@@ -62,6 +72,12 @@ func (m ConnectionList) Init() tea.Cmd { return nil }
 
 func (m ConnectionList) Update(msg tea.Msg) (ConnectionList, tea.Cmd) {
 	var cmd tea.Cmd = nil
+
+	switch msg.(type) {
+	case UpdateConnectionsMsg:
+		rows := util.MapSlice(m.connectionManager.Connections, makeRow)
+		m.table.SetRows(rows)
+	}
 
 	m.table, cmd = m.table.Update(msg)
 	return m, cmd

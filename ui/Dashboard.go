@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"mschon/dbproxy/tcp/mariadb"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -11,10 +13,12 @@ type Dashboard struct {
 
 	currentFocus int
 	focusList    []Focusable
+
+	connectionManager *mariadb.MariadbConnectionManager
 }
 
-func NewDashboard() Dashboard {
-	connectionList := NewConnectionList()
+func NewDashboard(connectionManager *mariadb.MariadbConnectionManager) Dashboard {
+	connectionList := NewConnectionList(connectionManager)
 	packetList := NewPacketList()
 
 	connectionList.Focus()
@@ -28,19 +32,14 @@ func NewDashboard() Dashboard {
 			&connectionList,
 			&packetList,
 		},
+
+		connectionManager: connectionManager,
 	}
 }
 
 func (m Dashboard) Init() tea.Cmd {
 	return nil
 }
-
-type FCS struct {
-	focus bool
-}
-
-func (FCS) Blur()  {}
-func (FCS) Focus() {}
 
 func (m Dashboard) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd = nil
